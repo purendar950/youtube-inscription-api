@@ -1,0 +1,5 @@
+# Minimal requirements - no Rust compilation needed
+fastapi
+uvicorn
+yt-dlp
+httpx
