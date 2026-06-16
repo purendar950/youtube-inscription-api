@@ -83,6 +83,7 @@ def _fetch_with_ytdlp(video_id: str, lang: str) -> Optional[dict]:
                     # Avoid 429 errors with delay
                     "throttledratelimit": 100000,
                 }
+                _add_cookie_opts(ydl_opts)
                 with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                     ydl.download([url])
 
@@ -291,7 +292,9 @@ def get_available_languages(video_id: str) -> list[dict]:
     try:
         import yt_dlp
         url = f"https://www.youtube.com/watch?v={video_id}"
-        with yt_dlp.YoutubeDL({"quiet": True, "no_warnings": True}) as ydl:
+        ydl_opts = {"quiet": True, "no_warnings": True}
+        _add_cookie_opts(ydl_opts)
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=False)
             subs = info.get("subtitles", {})
             auto_subs = info.get("automatic_captions", {})
@@ -429,3 +432,48 @@ def _seconds_to_timestamp(seconds: float) -> str:
     minutes = int(seconds // 60)
     secs = int(seconds % 60)
     return f"{minutes:02d}:{secs:02d}"
+
+
+# ─── Cookie Helpers ───────────────────────────────────────────────────────────
+
+COOKIE_SOURCES = []
+
+def _init_cookies():
+    """Initialize cookies from env vars on first call."""
+    if COOKIE_SOURCES:
+        return
+    # Option 1: YT_COOKIES_FILE env var pointing to a cookies.txt file
+    cookie_file = os.environ.get("YT_COOKIES_FILE")
+    if cookie_file and os.path.exists(cookie_file):
+        COOKIE_SOURCES.append(("cookiefile", cookie_file))
+        logger.info(f"Using cookies file: {cookie_file}")
+    # Option 2: YT_COOKIES_B64 env var with base64-encoded cookies.txt
+    cookie_b64 = os.environ.get("YT_COOKIES_B64")
+    if cookie_b64:
+        import base64
+        try:
+            decoded = base64.b64decode(cookie_b64).decode("utf-8")
+            tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False)
+            tmp.write(decoded)
+            tmp.close()
+            COOKIE_SOURCES.append(("cookiefile", tmp.name))
+            logger.info("Using cookies from YT_COOKIES_B64 env var")
+        except Exception as e:
+            logger.warning(f"Failed to decode YT_COOKIES_B64: {e}")
+
+
+def _add_cookie_opts(ydl_opts: dict):
+    """Add cookie options to yt-dlp opts dict if available."""
+    _init_cookies()
+    for kind, value in COOKIE_SOURCES:
+        ydl_opts[kind] = value
+    # Also add a browser-like User-Agent header to reduce bot detection
+    ydl_opts.setdefault("http_headers", {})
+    ydl_opts["http_headers"].update({
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/124.0.0.0 Safari/537.36"
+        ),
+        "Accept-Language": "en-US,en;q=0.9,hi;q=0.8",
+    })
